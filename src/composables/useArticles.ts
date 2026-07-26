@@ -1,16 +1,95 @@
 import { ref, computed } from 'vue'
 import { supabase, type Article, type ArticleWithTags } from '../../supabase/config'
 import { useAuth } from './useAuth'
+import {
+  fetchArticleList,
+  fetchArticleBySlug,
+  type BlogArticleListItem,
+  type BlogArticleDetail,
+} from '../api/blogApi'
 
 const articles = ref<ArticleWithTags[]>([])
 const article = ref<ArticleWithTags | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
+/** Maps a list item from the new blog API onto the old `ArticleWithTags`
+ * shape so ArticleDetail.vue / Home.vue don't need to change. List items
+ * don't carry id/content/createdAt/updatedAt (kept light on purpose) — id
+ * falls back to slug, which is what routing/keys already use anyway. */
+function mapListItem(a: BlogArticleListItem): ArticleWithTags {
+  return {
+    id: a.slug,
+    title: a.title,
+    slug: a.slug,
+    content: '',
+    excerpt: a.excerpt,
+    cover_image_url: a.coverThumbUrl,
+    author_id: null,
+    category_id: a.category?.slug ?? null,
+    published: true,
+    published_at: a.publishedAt,
+    views_count: a.viewCount,
+    likes_count: a.likeCount,
+    created_at: a.publishedAt ?? new Date().toISOString(),
+    updated_at: a.publishedAt ?? new Date().toISOString(),
+    tags: a.tags.map((t) => ({
+      id: t.slug,
+      name: t.name,
+      slug: t.slug,
+      description: null,
+      color: t.color,
+      icon: t.icon,
+      enabled: true,
+      usage_count: 0,
+    })) as any,
+    category: a.category
+      ? ({
+          id: a.category.slug,
+          name: a.category.name,
+          slug: a.category.slug,
+          description: null,
+          icon: a.category.icon,
+          color: a.category.color,
+          enabled: true,
+          sort_order: 0,
+        } as any)
+      : null,
+    author: a.author
+      ? { id: a.author.name, name: a.author.name, avatar_url: a.author.avatarThumbUrl, bio: null, specialization: null }
+      : undefined,
+  } as unknown as ArticleWithTags
+}
+
+/** Same idea as mapListItem, but detail responses have real id/content/timestamps
+ * and no `excerpt` (ArticleDetail.vue already falls back to stripping `content`
+ * itself when excerpt is falsy, so an empty string here is intentional). */
+function mapDetail(a: BlogArticleDetail): ArticleWithTags {
+  return {
+    ...mapListItem({ ...a, excerpt: '' }),
+    id: a.id,
+    content: a.contentHtml,
+    created_at: a.createdAt,
+    updated_at: a.updatedAt,
+    author: a.author
+      ? {
+          id: a.author.name,
+          name: a.author.name,
+          avatar_url: a.author.avatarThumbUrl,
+          bio: a.author.bio ?? null,
+          specialization: a.author.specialization ?? null,
+        }
+      : undefined,
+  } as unknown as ArticleWithTags
+}
+
 export function useArticles() {
   const { isAuthenticated, user } = useAuth()
 
-  // Fetch published articles with pagination
+  // Fetch published articles with pagination — now from the lab-services
+  // blog API. `categoryId`/`tagId` here are actually slugs (the new API has
+  // no separate numeric ids for these), kept as the same param names so
+  // call sites don't need to change.
   const fetchArticles = async (options?: {
     limit?: number
     offset?: number
@@ -24,47 +103,21 @@ export function useArticles() {
 
       const limit = options?.limit || 10
       const offset = options?.offset || 0
+      const page = Math.floor(offset / limit) + 1
 
-      let query = supabase
-        .from('articles')
-        .select(`
-          *,
-          category:categories(id, name, slug, icon, color),
-          author:authors!author_id(id, name, avatar_url, bio, specialization),
-          tags:article_tags(
-            tag:tags(id, name, slug, color, icon)
-          )
-        `)
-        .eq('published', true)
-        .order('published_at', { ascending: false })
-        .range(offset, offset + limit - 1)
+      const data = await fetchArticleList({
+        page,
+        pageSize: limit,
+        category: options?.categoryId,
+        tag: options?.tagId,
+      })
 
-      // Filter by category
-      if (options?.categoryId) {
-        query = query.eq('category_id', options.categoryId)
-      }
-
-      // Filter by author
-      if (options?.authorId) {
-        query = query.eq('author_id', options.authorId)
-      }
-
-      const { data, error: fetchError } = await query
-
-      if (fetchError) throw fetchError
-
-      // Transform data
-      const transformedArticles = (data || []).map((item: any) => ({
-        ...item,
-        tags: item.tags?.map((at: any) => at.tag).filter((t: any) => t) || [],
-        category: item.category || null,
-        author: item.author || null
-      }))
+      const transformedArticles = data.map(mapListItem)
 
       if (offset === 0) {
-        articles.value = transformedArticles as ArticleWithTags[]
+        articles.value = transformedArticles
       } else {
-        articles.value.push(...(transformedArticles as ArticleWithTags[]))
+        articles.value.push(...transformedArticles)
       }
 
       return {
@@ -80,150 +133,30 @@ export function useArticles() {
     }
   }
 
-  // Fetch articles by category
+  // Fetch articles by category — the new API filters by category slug
+  // directly, no separate lookup needed.
   const fetchArticlesByCategory = async (categorySlug: string, limit = 10, offset = 0) => {
-    try {
-      // First get category by slug
-      const { data: category, error: catError } = await supabase
-        .from('categories')
-        .select('id')
-        .eq('slug', categorySlug)
-        .eq('enabled', true)
-        .single()
-
-      if (catError || !category) {
-        throw new Error('Category not found')
-      }
-
-      return await fetchArticles({ categoryId: category.id, limit, offset })
-    } catch (err: any) {
-      error.value = err.message
-      return { data: [], hasMore: false }
-    }
+    return await fetchArticles({ categoryId: categorySlug, limit, offset })
   }
 
-  // Fetch articles by tag
+  // Fetch articles by tag — same simplification as category.
   const fetchArticlesByTag = async (tagSlug: string, limit = 10, offset = 0) => {
-    try {
-      // First get tag by slug
-      const { data: tag, error: tagError } = await supabase
-        .from('tags')
-        .select('id')
-        .eq('slug', tagSlug)
-        .eq('enabled', true)
-        .single()
-
-      if (tagError || !tag) {
-        throw new Error('Tag not found')
-      }
-
-      // Get articles with this tag
-      const { data: articleTags, error: atError } = await supabase
-        .from('article_tags')
-        .select('article_id')
-        .eq('tag_id', tag.id)
-
-      if (atError) throw atError
-
-      const articleIds = articleTags?.map(at => at.article_id) || []
-
-      if (articleIds.length === 0) {
-        return { data: [], hasMore: false }
-      }
-
-      const { data, error: fetchError } = await supabase
-        .from('articles')
-        .select(`
-          *,
-          category:categories(id, name, slug, icon, color),
-          author:authors!author_id(id, name, avatar_url, bio, specialization),
-          tags:article_tags(
-            tag:tags(id, name, slug, color, icon)
-          )
-        `)
-        .eq('published', true)
-        .in('id', articleIds)
-        .order('published_at', { ascending: false })
-        .range(offset, offset + limit - 1)
-
-      if (fetchError) throw fetchError
-
-      const transformedArticles = (data || []).map((item: any) => ({
-        ...item,
-        tags: item.tags?.map((at: any) => at.tag).filter((t: any) => t) || [],
-        category: item.category || null,
-        author: item.author || null
-      }))
-
-      return {
-        data: transformedArticles,
-        hasMore: transformedArticles.length === limit
-      }
-    } catch (err: any) {
-      error.value = err.message
-      return { data: [], hasMore: false }
-    }
+    return await fetchArticles({ tagId: tagSlug, limit, offset })
   }
 
-  // Helper function to check if string is UUID
-  const isUUID = (str: string): boolean => {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    return uuidRegex.test(str)
-  }
-
-  // Fetch single article by slug or id
+  // Fetch single article by slug or id — the new API only looks up by slug,
+  // which covers every routed call site (article ids in URLs are already
+  // slugs coming out of mapListItem/mapDetail above).
   const fetchArticle = async (identifier: string) => {
     try {
       loading.value = true
       error.value = null
 
-      // Build query based on whether identifier is UUID or slug
-      let query = supabase
-        .from('articles')
-        .select(`
-          *,
-          category:categories(id, name, slug, icon, color),
-          author:authors!author_id(
-            id, 
-            name, 
-            avatar_url, 
-            bio,
-            specialization
-          ),
-          tags:article_tags(
-            tag:tags(id, name, slug, color, icon)
-          )
-        `)
+      const data = await fetchArticleBySlug(identifier)
+      article.value = mapDetail(data)
 
-      // If identifier is UUID, query by id, otherwise query by slug
-      if (isUUID(identifier)) {
-        query = query.eq('id', identifier)
-      } else {
-        query = query.eq('slug', identifier)
-      }
-
-      const { data, error: fetchError } = await query.single()
-
-      if (fetchError) throw fetchError
-
-      // Transform data
-      article.value = {
-        ...data,
-        tags: data.tags?.map((at: any) => at.tag).filter((t: any) => t) || [],
-        category: data.category || null
-      }
-
-      // Increment views count (always increment, not just for authenticated users)
-      if (data) {
-        try {
-          await supabase
-            .from('articles')
-            .update({ views_count: (data.views_count || 0) + 1 })
-            .eq('id', data.id)
-        } catch (err) {
-          console.error('Error incrementing views:', err)
-        }
-      }
+      // View count is incremented server-side automatically on this same
+      // request — no separate "increment views" call needed anymore.
 
       return article.value
     } catch (err: any) {
@@ -235,61 +168,30 @@ export function useArticles() {
     }
   }
 
-  // Fetch related articles
+  // Fetch related articles — approximated as "other published articles in
+  // the same category" (the new API has no dedicated related-articles
+  // endpoint / cross-tag scoring like the old Supabase version did).
   const fetchRelatedArticles = async (articleId: string, limit = 4) => {
     try {
-      // Get current article's category and tags
       const currentArticle = article.value
-      if (!currentArticle) return []
+      if (!currentArticle?.category?.slug) return []
 
-      const categoryId = currentArticle.category_id
-      const tagIds = currentArticle.tags?.map(t => t.id) || []
-
-      // Build query for related articles
-      let query = supabase
-        .from('articles')
-        .select(`
-          *,
-          category:categories(id, name, slug, icon, color),
-          author:authors!author_id(id, name, avatar_url),
-          tags:article_tags(
-            tag:tags(id, name, slug, color, icon)
-          )
-        `)
-        .eq('published', true)
-        .neq('id', articleId)
-        .limit(limit)
-
-      // Filter by category or tags
-      if (categoryId) {
-        query = query.eq('category_id', categoryId)
-      }
-
-      const { data, error: fetchError } = await query
-
-      if (fetchError) throw fetchError
-
-      // Transform and sort by relevance
-      const transformed = (data || []).map((item: any) => ({
-        ...item,
-        tags: item.tags?.map((at: any) => at.tag).filter((t: any) => t) || [],
-        category: item.category || null,
-        author: item.author || null
-      }))
-
-      // Sort by number of matching tags
-      transformed.sort((a, b) => {
-        const aMatches = a.tags?.filter((t: any) => tagIds.includes(t.id)).length || 0
-        const bMatches = b.tags?.filter((t: any) => tagIds.includes(t.id)).length || 0
-        return bMatches - aMatches
-      })
-
-      return transformed.slice(0, limit)
+      const data = await fetchArticleList({ category: currentArticle.category.slug, pageSize: limit + 1 })
+      return data
+        .filter((a) => a.slug !== articleId)
+        .slice(0, limit)
+        .map(mapListItem)
     } catch (err: any) {
       console.error('Error fetching related articles:', err)
       return []
     }
   }
+
+  // ---- Everything below still talks to the OLD Supabase project directly.
+  // No routed view currently calls these (no admin/editor UI exists yet) —
+  // left as-is rather than migrated blind. Wire these to
+  // POST/PATCH/DELETE /blog/admin/articles (with a writer JWT) when an
+  // admin UI is actually built. ----
 
   // Create article (author only)
   const createArticle = async (articleData: {
@@ -461,4 +363,3 @@ export function useArticles() {
     deleteArticle
   }
 }
-

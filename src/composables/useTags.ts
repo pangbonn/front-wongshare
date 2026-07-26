@@ -1,26 +1,35 @@
 import { ref, computed } from 'vue'
 import { supabase, type Tag } from '../../supabase/config'
+import { fetchTagList } from '../api/blogApi'
 
 const tags = ref<Tag[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 
+/** Maps the new API's shape onto the old `Tag` type so consuming components
+ * (Home.vue) don't need to change at all. */
+function toLegacyTag(t: { name: string; slug: string; icon: string | null; color: string | null; usageCount: number }): Tag {
+  return {
+    id: t.slug,
+    name: t.name,
+    slug: t.slug,
+    description: null,
+    color: t.color,
+    icon: t.icon,
+    enabled: true,
+    usage_count: t.usageCount,
+  } as Tag
+}
+
 export function useTags() {
-  // Fetch all enabled tags
+  // Fetch all enabled tags — now from the lab-services blog API.
   const fetchTags = async () => {
     try {
       loading.value = true
       error.value = null
 
-      const { data, error: fetchError } = await supabase
-        .from('tags')
-        .select('*')
-        .eq('enabled', true)
-        .order('usage_count', { ascending: false })
-        .order('name', { ascending: true })
-
-      if (fetchError) throw fetchError
-      tags.value = data || []
+      const data = await fetchTagList()
+      tags.value = data.map(toLegacyTag)
     } catch (err: any) {
       error.value = err.message || 'เกิดข้อผิดพลาดในการโหลดแท็ก'
       console.error('Error fetching tags:', err)
@@ -28,6 +37,12 @@ export function useTags() {
       loading.value = false
     }
   }
+
+  // ---- Everything below still talks to the OLD Supabase project directly.
+  // No routed view currently calls these (no admin/editor UI exists yet) —
+  // left as-is rather than migrated blind. Wire these to
+  // POST/PATCH/DELETE /blog/admin/tags (with a writer JWT) when an admin UI
+  // is actually built. ----
 
   // Fetch all tags (including disabled) - for admin
   const fetchAllTags = async () => {
@@ -69,7 +84,7 @@ export function useTags() {
         .eq('article_id', articleId)
 
       if (fetchError) throw fetchError
-      
+
       // Transform data
       return (data || [])
         .map((item: any) => item.tags)
@@ -190,12 +205,12 @@ export function useTags() {
     try {
       // Remove all existing tags
       await removeAllTagsFromArticle(articleId)
-      
+
       // Add new tags
       if (tagIds.length > 0) {
         return await addTagsToArticle(articleId, tagIds)
       }
-      
+
       return { success: true, error: null }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -324,4 +339,3 @@ export function useTags() {
     searchTags
   }
 }
-

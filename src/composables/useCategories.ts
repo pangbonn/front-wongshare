@@ -1,26 +1,34 @@
 import { ref, computed } from 'vue'
 import { supabase, type Category } from '../../supabase/config'
+import { fetchCategoryList } from '../api/blogApi'
 
 const categories = ref<Category[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 
+/** Maps the new API's shape onto the old `Category` type so consuming
+ * components (Home.vue) don't need to change at all. */
+function toLegacyCategory(c: { name: string; slug: string; icon: string | null; color: string | null }): Category {
+  return {
+    id: c.slug,
+    name: c.name,
+    slug: c.slug,
+    icon: c.icon,
+    color: c.color,
+    enabled: true,
+    sort_order: 0,
+  } as Category
+}
+
 export function useCategories() {
-  // Fetch all enabled categories
+  // Fetch all enabled categories — now from the lab-services blog API.
   const fetchCategories = async () => {
     try {
       loading.value = true
       error.value = null
 
-      const { data, error: fetchError } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('enabled', true)
-        .order('sort_order', { ascending: true })
-        .order('name', { ascending: true })
-
-      if (fetchError) throw fetchError
-      categories.value = data || []
+      const data = await fetchCategoryList()
+      categories.value = data.map(toLegacyCategory)
     } catch (err: any) {
       error.value = err.message || 'เกิดข้อผิดพลาดในการโหลดหมวดหมู่'
       console.error('Error fetching categories:', err)
@@ -28,6 +36,12 @@ export function useCategories() {
       loading.value = false
     }
   }
+
+  // ---- Everything below still talks to the OLD Supabase project directly.
+  // No routed view currently calls these (no admin/editor UI exists yet) —
+  // left as-is rather than migrated blind. Wire these to
+  // POST/PATCH/DELETE /blog/admin/categories (with a writer JWT) when an
+  // admin UI is actually built. ----
 
   // Fetch all categories (including disabled) - for admin
   const fetchAllCategories = async () => {
@@ -183,4 +197,3 @@ export function useCategories() {
     toggleCategory
   }
 }
-
