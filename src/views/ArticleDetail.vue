@@ -2,6 +2,11 @@
   <div class="min-h-screen bg-white dark:bg-gray-950 transition-colors duration-200">
     <Header :show-back-button="true" />
 
+    <!-- Reading progress -->
+    <div v-if="article && !isLoading" class="fixed top-14 inset-x-0 z-40 h-0.5 pointer-events-none" aria-hidden="true">
+      <div class="h-full bg-blue-500 origin-left" :style="{ transform: `scaleX(${readProgress})` }" />
+    </div>
+
     <!-- Skeleton -->
     <ArticleDetailSkeleton v-if="isLoading" />
 
@@ -19,24 +24,34 @@
     </div>
 
     <!-- Article -->
-    <div v-else-if="article" class="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+    <div v-else-if="article" class="relative max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+
+      <!-- Table of contents (desktop: sticky sidebar) -->
+      <aside v-if="headings.length >= 2" class="hidden xl:block absolute top-10 bottom-0 left-full w-56 ml-4">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">สารบัญ</p>
+          <ArticleToc :headings="headings" :active-id="activeHeadingId" @navigate="goToHeading" />
+        </div>
+      </aside>
 
       <!-- Category + Tags -->
       <div v-if="article.category || (article.tags && article.tags.length)" class="flex flex-wrap gap-2 mb-5">
-        <span
+        <router-link
           v-if="article.category"
-          class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold"
+          :to="{ path: '/', query: { category: article.categorySlug } }"
+          class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold hover:opacity-80 transition-opacity"
           :style="{
             backgroundColor: article.categoryColor ? article.categoryColor + '18' : undefined,
             color: article.categoryColor || undefined
           }"
           :class="!article.categoryColor ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300' : ''"
-        >{{ article.category }}</span>
-        <span
+        >{{ article.category }}</router-link>
+        <router-link
           v-for="tag in article.tags"
-          :key="tag"
-          class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
-        >{{ tag }}</span>
+          :key="tag.slug"
+          :to="{ path: '/', query: { tag: tag.slug } }"
+          class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+        >#{{ tag.name }}</router-link>
       </div>
 
       <!-- Title -->
@@ -150,14 +165,23 @@
         </div>
       </div>
 
-      <!-- Article content — prose + dark:prose-invert -->
-      <div class="prose prose-gray dark:prose-invert prose-sm sm:prose-base max-w-none
-        prose-headings:font-bold
-        prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
-        prose-blockquote:border-gray-300 dark:prose-blockquote:border-gray-600 prose-blockquote:text-gray-600 dark:prose-blockquote:text-gray-400
-        prose-img:rounded-xl prose-img:shadow-sm
-      ">
-        <div v-if="article.content" v-html="article.content" />
+      <!-- Article content — images, code, diagrams, callouts -->
+      <!-- Table of contents (mobile / tablet: collapsible) -->
+      <details
+        v-if="headings.length >= 2"
+        ref="mobileToc"
+        class="xl:hidden mb-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900"
+      >
+        <summary class="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
+          สารบัญ ({{ headings.length }} หัวข้อ)
+        </summary>
+        <div class="px-2 pb-3">
+          <ArticleToc :headings="headings" :active-id="activeHeadingId" @navigate="goToHeading" />
+        </div>
+      </details>
+
+      <div ref="contentEl">
+        <ArticleContent v-if="article.content" :html="article.content" @headings="onHeadings" />
       </div>
 
       <!-- Footer stats -->
@@ -232,22 +256,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import hljs from 'highlight.js/lib/core'
-import javascript from 'highlight.js/lib/languages/javascript'
-import css from 'highlight.js/lib/languages/css'
-import python from 'highlight.js/lib/languages/python'
 import Header from '../components/Header.vue'
 import ArticleDetailSkeleton from '../components/ArticleDetailSkeleton.vue'
+import ArticleContent, { type ArticleHeading } from '../components/ArticleContent.vue'
+import ArticleToc from '../components/ArticleToc.vue'
 import { useArticles } from '@/composables/useArticles'
 import { useFavorites } from '@/composables/useFavorites'
 import { useAuth } from '@/composables/useAuth'
-
-// ไม่ import highlight.js CSS — ใช้ style.css แทนเพื่อรองรับ dark mode
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('python', python)
+import { sampleArticle, SAMPLE_ARTICLE_ID } from '@/data/sampleArticle'
+import { setPageMeta, resetPageMeta } from '@/utils/pageMeta'
+import { HEADER_OFFSET, scrollToAnchor, pinToAnchor } from '@/utils/scroll'
 
 const router = useRouter()
 const route = useRoute()
@@ -266,8 +286,9 @@ interface Article {
   readingTime: number
   image: string | null
   category: string
+  categorySlug: string
   categoryColor: string | null
-  tags: string[]
+  tags: { name: string; slug: string }[]
 }
 
 interface RelatedArticle {
@@ -334,8 +355,9 @@ watch(supabaseArticle, async (newArticle) => {
     readingTime: calculateReadingTime(content),
     image: newArticle.cover_image_url || null,
     category: newArticle.category?.name || '',
+    categorySlug: newArticle.category?.slug || '',
     categoryColor: newArticle.category?.color || null,
-    tags: newArticle.tags?.map((t: any) => t.name) || []
+    tags: newArticle.tags?.map((t: any) => ({ name: t.name, slug: t.slug })) || []
   }
   imageLoading.value = !!article.value.image
   imageError.value = false
@@ -400,15 +422,81 @@ const shareArticle = async () => {
 
 const goToArticle = (id: string) => router.push(`/article/${id}`)
 
-const highlightCode = () => {
-  nextTick(() => {
-    document.querySelectorAll('pre code').forEach((block) => {
-      hljs.highlightElement(block as HTMLElement)
-    })
-  })
+// ---- Table of contents + reading progress ----
+const contentEl = ref<HTMLElement | null>(null)
+const mobileToc = ref<HTMLDetailsElement | null>(null)
+const headings = ref<ArticleHeading[]>([])
+const activeHeadingId = ref<string | null>(null)
+const readProgress = ref(0)
+
+const updateScrollState = () => {
+  const el = contentEl.value
+  if (el) {
+    const start = el.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET
+    const distance = el.offsetHeight - window.innerHeight + HEADER_OFFSET
+    readProgress.value = Math.min(1, Math.max(0, (window.scrollY - start) / Math.max(distance, 1)))
+  }
+
+  let current: string | null = null
+  for (const h of headings.value) {
+    const node = document.getElementById(h.id)
+    if (node && node.getBoundingClientRect().top <= HEADER_OFFSET + 10) current = h.id
+    else break
+  }
+  activeHeadingId.value = current ?? headings.value[0]?.id ?? null
 }
 
-watch(articleId, (id) => { if (id) fetchFromSupabase(id) }, { immediate: true })
-watch(() => article.value?.content, () => { if (article.value?.content) highlightCode() })
-onMounted(() => { highlightCode() })
+let scrollFrame = 0
+const onScroll = () => {
+  cancelAnimationFrame(scrollFrame)
+  scrollFrame = requestAnimationFrame(updateScrollState)
+}
+
+let stopPinning = () => {}
+
+const onHeadings = async (list: ArticleHeading[]) => {
+  headings.value = list
+  await nextTick()
+  // Deep link (/article/x#heading): content renders after navigation, so scroll here
+  stopPinning()
+  if (route.hash) stopPinning = pinToAnchor(route.hash.slice(1))
+  updateScrollState()
+}
+
+const goToHeading = (id: string) => {
+  if (mobileToc.value) mobileToc.value.open = false
+  // Same hash → router treats it as a duplicate navigation and won't scroll
+  if (route.hash.slice(1) === id) scrollToAnchor(id)
+  else router.replace({ hash: `#${id}` })
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', onScroll, { passive: true })
+  window.addEventListener('resize', onScroll, { passive: true })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', onScroll)
+  window.removeEventListener('resize', onScroll)
+  cancelAnimationFrame(scrollFrame)
+  stopPinning()
+  resetPageMeta()
+})
+
+watch(article, (a) => {
+  if (a) setPageMeta({ title: a.title, description: a.summary, image: a.image, type: 'article' })
+})
+
+watch(articleId, (id) => {
+  headings.value = []
+  readProgress.value = 0
+  if (id === SAMPLE_ARTICLE_ID) {
+    article.value = { ...sampleArticle }
+    imageLoading.value = true
+    imageError.value = false
+    relatedArticles.value = []
+    return
+  }
+  if (id) fetchFromSupabase(id)
+}, { immediate: true })
 </script>

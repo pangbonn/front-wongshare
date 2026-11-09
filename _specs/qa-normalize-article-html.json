@@ -1,0 +1,7 @@
+{
+  "role": "QA",
+  "status": "done",
+  "runner": "_specs/qa-run.ts",
+  "result": "PASS hasPythonHeading, noTemplateTag, noScriptTag, noMustache, noAtClick, hasAsyncioCode, hasThreadingCode, plainHtmlPassthrough, empty",
+  "typecheck": "vue-tsc -b exit 0"
+}

@@ -1,0 +1,15 @@
+{
+  "role": "ARCHITECT",
+  "decision": "Normalize contentHtml at mapDetail time into static HTML safe for v-html. Do not compile Vue SFCs at runtime (runtime-only Vue build, bundle cost, XSS).",
+  "utility": "src/utils/normalizeArticleHtml.ts",
+  "steps": [
+    "If payload looks like a Vue SFC, unwrap innermost/outer <template> innerHTML",
+    "Drop <script> and <style>",
+    "If script has codeSnippets template literals, replace {{ currentCodeSnippet }} pre/code with static stacked <pre><code> blocks",
+    "Remove @click buttons (tabs/copy cannot work statically)",
+    "Strip remaining Vue directives (@, :, v-) and mustaches",
+    "Strip HTML comments"
+  ],
+  "wire": "useArticles.mapDetail: content: normalizeArticleHtml(a.contentHtml)",
+  "outOfScope": ["runtime SFC compiler", "Font Awesome CDN", "Tailwind safelist for CMS utilities"]
+}

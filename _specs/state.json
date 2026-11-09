@@ -1,0 +1,12 @@
+{
+  "task": "article-detail-content-not-showing",
+  "status": "done",
+  "roles": {
+    "RESEARCHER": "done",
+    "ARCHITECT": "done",
+    "CODER": "done",
+    "QA": "done"
+  },
+  "finding": "contentHtml is a Vue SFC wrapped in <template>; v-html uses innerHTML so the browser hides template contents",
+  "fix": "src/utils/normalizeArticleHtml.ts unwraps SFC to static HTML; useArticles.mapDetail applies it"
+}

@@ -1,0 +1,16 @@
+{
+  "role": "RESEARCHER",
+  "problem": "Article detail page does not render body content even though API returns contentHtml",
+  "evidence": {
+    "apiField": "contentHtml",
+    "mapping": "useArticles.mapDetail sets content: a.contentHtml",
+    "render": "ArticleDetail.vue uses v-html=\"article.content\"",
+    "payloadShape": "Vue SFC: HTML comments + <template>...</template> + <script setup> with Vue directives (@click, :class, {{ currentCodeSnippet }})"
+  },
+  "rootCause": "HTML5 <template> is inert: children live in a DocumentFragment and are not painted. v-html = innerHTML, so the whole article body is invisible. <script> via innerHTML also does not run, so tabs/copy/interpolations cannot work.",
+  "secondary": [
+    "Vue directives and mustaches are inert inside v-html",
+    "Font Awesome classes in payload are not loaded in index.html",
+    "Tailwind JIT will not generate utility classes that exist only in CMS HTML"
+  ]
+}

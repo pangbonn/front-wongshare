@@ -7,6 +7,7 @@ import {
   type BlogArticleListItem,
   type BlogArticleDetail,
 } from '../api/blogApi'
+import { normalizeArticleHtml } from '../utils/normalizeArticleHtml'
 
 const articles = ref<ArticleWithTags[]>([])
 const article = ref<ArticleWithTags | null>(null)
@@ -68,7 +69,7 @@ function mapDetail(a: BlogArticleDetail): ArticleWithTags {
   return {
     ...mapListItem({ ...a, excerpt: '' }),
     id: a.id,
-    content: a.contentHtml,
+    content: normalizeArticleHtml(a.contentHtml),
     created_at: a.createdAt,
     updated_at: a.updatedAt,
     author: a.author

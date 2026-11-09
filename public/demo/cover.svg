@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e3a8a"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2">
+    <circle cx="1050" cy="80" r="220"/><circle cx="1050" cy="80" r="300"/><circle cx="120" cy="560" r="180"/>
+  </g>
+  <!-- Vue card -->
+  <g transform="translate(170 190)">
+    <rect width="300" height="220" rx="24" fill="#ffffff" fill-opacity="0.95"/>
+    <path d="M90 70h40l20 34 20-34h40l-60 104z" fill="#41b883"/>
+    <path d="M130 70h20l0 0 0 0h20l-20 34z" fill="#35495e"/>
+    <text x="150" y="200" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="700" fill="#1f2937">Vue 3</text>
+  </g>
+  <!-- arrow -->
+  <g stroke="#ffffff" stroke-width="6" stroke-linecap="round" fill="none">
+    <path d="M510 300h170"/><path d="M655 275l25 25-25 25"/>
+  </g>
+  <!-- Supabase card -->
+  <g transform="translate(730 190)">
+    <rect width="300" height="220" rx="24" fill="#ffffff" fill-opacity="0.95"/>
+    <path d="M160 50 95 132h55l-10 58 65-82h-55z" fill="#3ecf8e"/>
+    <text x="150" y="200" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="700" fill="#1f2937">Supabase</text>
+  </g>
+  <!-- heart badge -->
+  <g transform="translate(565 200)">
+    <circle cx="30" cy="30" r="30" fill="#ef4444"/>
+    <path d="M30 44s-14-8-14-18a8 8 0 0 1 14-5 8 8 0 0 1 14 5c0 10-14 18-14 18z" fill="#fff"/>
+  </g>
+</svg>

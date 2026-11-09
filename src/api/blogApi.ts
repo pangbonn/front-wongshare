@@ -1,13 +1,14 @@
 // Thin client for the lab-services NestJS blog API — replaces direct
-// supabase-js access for CONTENT reads only (articles/categories/tags).
-// Reader auth, favorites, notifications, and email/payment subscriptions
+// supabase-js access for content reads (articles/categories/tags) and the
+// new-article email subscription (no login, double opt-in).
+// Reader auth, favorites, notifications, and payment subscriptions
 // still use the old Supabase project (../../supabase/config) — that split
 // is deliberate, see lab-services/docs/info-blog.md.
 
 const BASE_URL = import.meta.env.VITE_BLOG_API_URL || 'http://localhost:3000'
 
-async function request<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`)
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, init)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message || `Blog API request failed: ${res.status}`)
@@ -88,4 +89,22 @@ export function fetchCategoryList() {
 
 export function fetchTagList() {
   return request<(BlogTag & { usageCount: number })[]>('/blog/tags')
+}
+
+// Always resolves { ok: true } for a valid email — the API doesn't reveal
+// whether the address was already subscribed. A confirmation email follows.
+export function subscribeEmail(email: string) {
+  return request<{ ok: true }>('/blog/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+}
+
+export function confirmSubscription(token: string) {
+  return request<{ confirmed: true }>(`/blog/subscribe/confirm/${encodeURIComponent(token)}`)
+}
+
+export function unsubscribeEmail(token: string) {
+  return request<{ unsubscribed: true }>(`/blog/unsubscribe/${encodeURIComponent(token)}`)
 }

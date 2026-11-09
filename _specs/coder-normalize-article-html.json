@@ -1,0 +1,9 @@
+{
+  "role": "CODER",
+  "status": "done",
+  "files": [
+    "src/utils/normalizeArticleHtml.ts",
+    "src/composables/useArticles.ts"
+  ],
+  "change": "mapDetail now stores normalizeArticleHtml(contentHtml) so v-html receives real HTML instead of a Vue SFC"
+}
